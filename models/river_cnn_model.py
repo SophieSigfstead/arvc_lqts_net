@@ -40,7 +40,7 @@ def build_model(input_shape=(2500, 8)):
     model.add(layers.Dropout(rate=0.2))
 
     # Output
-    model.add(layers.Dense(2, activation="softmax"))
+    model.add(layers.Dense(3, activation="softmax"))
     model.compile(optimizer='adam',
                   loss='sparse_categorical_crossentropy',
                   metrics=['accuracy'])

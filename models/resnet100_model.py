@@ -26,26 +26,6 @@ def build_model(input_shape=(2500, 8)):
         x = layers.ReLU()(x)
         return x
 
-    def identity_block(x, filters, kernel_size=3):
-        shortcut = x
-
-        # First 1x1 Conv layer
-        x = layers.Conv1D(filters, kernel_size=1, padding='same', activation='relu')(x)
-        x = layers.BatchNormalization()(x)
-
-        # Second Conv layer
-        x = layers.Conv1D(filters, kernel_size=3, padding='same', activation='relu')(x)
-        x = layers.BatchNormalization()(x)
-
-        # Third 1x1 Conv layer
-        x = layers.Conv1D(filters * 4, kernel_size=1, padding='same', activation=None)(x)
-        x = layers.BatchNormalization()(x)
-
-        # Add skip connection and activation
-        x = layers.Add()([shortcut, x])
-        x = layers.ReLU()(x)
-        return x
-
     inputs = layers.Input(shape=input_shape)
 
     # Initial Conv layer
@@ -53,19 +33,28 @@ def build_model(input_shape=(2500, 8)):
     x = layers.BatchNormalization()(x)
     x = layers.MaxPooling1D(pool_size=3, strides=2, padding='same')(x)
 
-    # ResNet Blocks
-    for filters, num_blocks in zip([64, 128, 256, 512], [3, 4, 6, 3]):
-        # First block uses conv_block with strides of 2
-        x = conv_block(x, filters, strides=2)
-        for _ in range(num_blocks - 1):
-            x = identity_block(x, filters)
+    # Stage 1: 3 blocks with 64 filters (9 layers)
+    for _ in range(3):
+        x = conv_block(x, 64)
+
+    # Stage 2: 14 blocks with 128 filters (42 layers)
+    for _ in range(14):
+        x = conv_block(x, 128)
+
+    # Stage 3: 30 blocks with 256 filters (90 layers)
+    for _ in range(30):
+        x = conv_block(x, 256)
+
+    # Stage 4: 3 blocks with 512 filters (9 layers)
+    for _ in range(3):
+        x = conv_block(x, 512)
 
     # Global Average Pooling and Output
     x = layers.GlobalAveragePooling1D()(x)
-    x = layers.Dense(3, activation='softmax')(x)
+    outputs = layers.Dense(3, activation='softmax')(x)
 
     # Create Model
-    model = models.Model(inputs, x)
+    model = models.Model(inputs=inputs, outputs=outputs)
 
     # Compile Model
     model.compile(optimizer='adam',

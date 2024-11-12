@@ -133,7 +133,7 @@ class ResNet(Model):
         return x
 
 def build_model(input_shape=(2500, 8)):
-    model = ResNet(num_outputs = 5)
+    model = ResNet(num_outputs = 3)
     model.build((None, 2500, 8))
     model.compile(
         optimizer='adam',

@@ -1,4 +1,5 @@
 import os
+import comet_ml as cm
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -7,7 +8,7 @@ from collections import defaultdict
 import glob
 import re
 from keras import layers, models, callbacks
-from sklearn.metrics import classification_report, roc_auc_score
+from sklearn.metrics import classification_report, roc_auc_score, confusion_matrix
 from sklearn.preprocessing import label_binarize
 import importlib
 
@@ -20,14 +21,11 @@ def extract_patient_id(filename):
 def load_ecg_data(root_dir):
     class_map = {
         "ARVC": [
-            "arvc_gene_negative_definite_csv", "arvc_gene_negative_possible_csv",
-            "arvc_gene_negative_probable_csv", "arvc_gene_positive_definite_csv",
-            "arvc_gene_positive_possible_csv", "arvc_gene_positive_probable_csv"
+            "arvc_gene_negative_definite_csv", "arvc_gene_positive_probable_csv",
+            "arvc_gene_negative_probable_csv", "arvc_gene_positive_definite_csv"
         ],
         "CONTROL": ["control_csv"],
-        "LQTS-negative": ["lqts_gene_negative_csv"],
-        "LQTS-type1": ["lqts_type_1_csv"],
-        "LQTS-type2": ["lqts_type_2_csv"]
+        "LQTS": ["lqts_gene_negative_csv", "lqts_type_1_csv", "lqts_type_2_csv"]
     }
 
     patient_map = defaultdict(list)
@@ -64,7 +62,7 @@ def preprocess_ecg(file_path):
 def prepare_dataset(patient_map, patient_ids):
     X = []
     y = []
-    label_encoding = {"ARVC": 0, "CONTROL": 1, "LQTS-negative": 2, "LQTS-type1": 3, "LQTS-type2": 4}
+    label_encoding = {"ARVC": 0, "CONTROL": 1, "LQTS": 2}
 
     for patient_id in patient_ids:
         for file_path, label in patient_map[patient_id]:
@@ -80,7 +78,6 @@ def prepare_dataset(patient_map, patient_ids):
 # Function to load a specific model
 def load_model(model_name, input_shape=(2500, 8)):
     try:
-        # Import the model module from the 'models' directory
         model_module = importlib.import_module(f"models.{model_name}")
         model = model_module.build_model(input_shape)
         print(f"Loaded model: {model_name}")
@@ -90,7 +87,7 @@ def load_model(model_name, input_shape=(2500, 8)):
         return None
 
 # Main function for training and evaluation
-def train_and_evaluate(root_dir, model):
+def train_and_evaluate(root_dir, model, epochs, batch_size, experiment):
     print("Loading data...")
     patient_map = load_ecg_data(root_dir)
 
@@ -105,25 +102,51 @@ def train_and_evaluate(root_dir, model):
     print(f"Training data shape: {X_train.shape}, Validation data shape: {X_val.shape}, Test data shape: {X_test.shape}")
 
     print("Training model...")
-    batch_size = min(32, len(X_train)) 
-    history = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=100, batch_size=batch_size)
+    history = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
 
     print("Evaluating model...")
     test_loss, test_accuracy = model.evaluate(X_test, y_test)
     print(f"Test Loss: {test_loss:.4f}")
     print(f"Test Accuracy: {test_accuracy:.2f}")
+    experiment.log_metric("Test_Loss", test_loss)
+    experiment.log_metric("Test_Accuracy", test_accuracy)
 
     # Predicting on the test set
     y_pred_probs = model.predict(X_test)
     y_pred = np.argmax(y_pred_probs, axis=1)
 
-    # Binarize the labels for ROC-AUC calculation
-    y_test_binarized = label_binarize(y_test, classes=[0, 1, 2, 3, 4])
+    # Confusion Matrix
+    cm = confusion_matrix(y_test, y_pred, labels=[0, 1, 2])
+    print("Confusion Matrix:")
+    print(cm)
+
+    # Metrics Calculation
+    tp = np.diag(cm)
+    fp = cm.sum(axis=0) - tp
+    fn = cm.sum(axis=1) - tp
+    tn = cm.sum() - (fp + fn + tp)
+
+    for i, label in enumerate(["ARVC", "CONTROL", "LQTS"]):
+        print(f"\nMetrics for {label}:")
+        print(f"True Positives (TP): {tp[i]}")
+        print(f"False Positives (FP): {fp[i]}")
+        print(f"False Negatives (FN): {fn[i]}")
+        print(f"True Negatives (TN): {tn[i]}")
+
+    # Sensitivity and Specificity
+    sensitivity = tp / (tp + fn)
+    specificity = tn / (tn + fp)
+    experiment.log_metric("Test_Sensitivity", sensitivity.mean())
+    experiment.log_metric("Test_Specificity", specificity.mean())
+
+    # ROC-AUC Score
+    y_test_binarized = label_binarize(y_test, classes=[0, 1, 2])
     auc_score = roc_auc_score(y_test_binarized, y_pred_probs, average='macro', multi_class='ovr')
     print(f"Macro-Averaged ROC-AUC Score: {auc_score:.2f}")
+    experiment.log_metric("Test_ROC_AUC", auc_score)
 
-    # Classification report
-    print("Classification Report:")
-    print(classification_report(y_test, y_pred, target_names=["ARVC", "CONTROL", "LQTS-negative", "LQTS-type1", "LQTS-type2"]))
+    # Classification Report
+    #print("Classification Report:")
+    #print(classification_report(y_test, y_pred, target_names=["ARVC", "CONTROL", "LQTS"]))
 
     return model, history

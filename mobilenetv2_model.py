@@ -6,7 +6,7 @@ def build_model(input_shape=(2500, 8)):
     model = models.Sequential([
         base_model,
         layers.GlobalAveragePooling1D(),
-        layers.Dense(5, activation='softmax')
+        layers.Dense(3, activation='softmax')
     ])
 
     model.compile(optimizer='adam',
