@@ -21,5 +21,5 @@ def build_model(input_shape=(2500, 8)):
 
     model.compile(optimizer='adam',
                   loss='sparse_categorical_crossentropy',
-                  metrics=['accuracy', metrics.AUC(name='auc')])
+                  metrics=['accuracy'])
     return model

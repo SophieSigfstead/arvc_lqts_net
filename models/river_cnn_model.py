@@ -41,5 +41,8 @@ def build_model(input_shape=(2500, 8)):
 
     # Output
     model.add(layers.Dense(2, activation="softmax"))
+    model.compile(optimizer='adam',
+                  loss='sparse_categorical_crossentropy',
+                  metrics=['accuracy'])
 
     return model
