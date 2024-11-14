@@ -119,6 +119,7 @@ def train_and_evaluate(root_dir, model, epochs, batch_size, experiment):
     cm = confusion_matrix(y_test, y_pred, labels=[0, 1, 2])
     print("Confusion Matrix:")
     print(cm)
+    experiment.log_confusion_matrix(y_true = y_test, y_predicted = y_pred, labels=[0, 1, 2])
 
     # Metrics Calculation
     tp = np.diag(cm)
