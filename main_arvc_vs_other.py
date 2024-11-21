@@ -1,7 +1,7 @@
 from comet_ml import Optimizer
 import sys
 import os
-from ecg_classifier import train_and_evaluate, load_model
+from ecg_classifier_arvc_vs_other import train_and_evaluate, load_model
 
 def get_experiment(experiment, model_name):
     experiment.log_parameter("model_type", f"{model_name}")
@@ -21,7 +21,7 @@ if __name__ == "__main__":
         "algorithm": "random",
         "parameters": {
             "batch_size": {"type": "discrete", "values": [4, 8]},
-            "epochs": {"type": "discrete", "values": [10,15,18, 20,25,30]},
+            "epochs": {"type": "discrete", "values": [10,15,20,25]},
         },
         "spec": {
             "metric": opt_metric,
@@ -31,7 +31,7 @@ if __name__ == "__main__":
     }
 
     root_dir = "./csv_ecgs"
-    models_dir = "./models"
+    models_dir = "./models_2_class"
     model_files = [f.replace(".py", "") for f in os.listdir(models_dir) if f.endswith("_model.py")]
 
     # Iterate over each model file and run a separate optimizer for each model
@@ -48,7 +48,7 @@ if __name__ == "__main__":
         opt = Optimizer(config)
 
         # Iterate over each experiment configuration provided by the optimizer
-        for experiment in opt.get_experiments(workspace="sophiesigfstead", project_name="lqts-arvc-project-initial-runs", api_key=comet_ml_key):
+        for experiment in opt.get_experiments(workspace="sophiesigfstead", project_name="lqts-arvc-project-arvc_vs_other", api_key=comet_ml_key):
             try:
                 # Log the experiment parameters
                 experiment_curr = get_experiment(experiment, model_name)

@@ -16,26 +16,54 @@ def extract_patient_id(filename):
     match = re.match(r"(\d{6})", os.path.basename(filename))
     return match.group(1) if match else None
 
-# Function to load ECG data and group by patient ID
 def load_ecg_data(root_dir):
+
     class_map = {
         "ARVC": [
             "arvc_gene_negative_definite_csv", "arvc_gene_positive_probable_csv",
             "arvc_gene_negative_probable_csv", "arvc_gene_positive_definite_csv"
         ],
-        "CONTROL": ["control_csv"],
-        "LQTS": ["lqts_gene_negative_csv", "lqts_type_1_csv", "lqts_type_2_csv"]
+        "CONTROL_LQTS": ["control_csv", "lqts_gene_negative_csv", "lqts_type_1_csv", "lqts_type_2_csv"],
     }
 
-    patient_map = defaultdict(list)
+    # Load metadata files
+    arvc_control_qt = pd.read_csv('METADATA_Gene_Positive_vs_(Gene_Negative+Unaffected_Relatives+Control).csv')
+    arvc_control_qt['filename'] = arvc_control_qt['filename'].str.replace('.xml', '.csv', regex=False)
+
+    stollery_qt = pd.read_csv('stollery_qc_2023.01.16-3.csv')
+
+    regular_lqts = pd.read_csv('ecg_qc2022.12.21-21.csv')
+    
+    # Collect bad ECG filenames
+    bad_ecgs_arvc = arvc_control_qt[arvc_control_qt['qc'] != "good"]['filename'].tolist()
+    bad_ecgs_stollery = stollery_qt[stollery_qt['qc'] != "Good"]['file'].tolist()
+    bad_ecgs_lqts = regular_lqts[regular_lqts['qc'] != "Good"]['file'].tolist()
+    print(len(bad_ecgs_arvc))
+    print(len(bad_ecgs_stollery))
+    print(len(bad_ecgs_lqts))
+
+    bad_count = 0
+    bad_ecgs = set(bad_ecgs_arvc + bad_ecgs_stollery + bad_ecgs_lqts)  # Combine all bad ECGs into a set
+    print("Number of bad ecgs" , len(list(set(bad_ecgs_arvc + bad_ecgs_stollery + bad_ecgs_lqts))))
+    
+    patient_map = defaultdict(list) 
     for label, dirs in class_map.items():
         for sub_dir in dirs:
             full_dir = os.path.join(root_dir, sub_dir)
             for file_path in glob.glob(os.path.join(full_dir, "*.csv")):
+                # Extract filename from file path
+                file_name = os.path.basename(file_path)
+
+                # Exclude bad ECGs
+                if file_name in bad_ecgs:
+                    bad_count +=1
+                    continue
+
+                # Extract patient ID
                 patient_id = extract_patient_id(file_path)
                 if patient_id:
                     patient_map[patient_id].append((file_path, label))
-
+    print("Bad count", bad_count)
     return patient_map
 
 # Function to split data without splitting patient IDs
@@ -71,7 +99,7 @@ def augment_ecg_data(ecg_data):
 def prepare_dataset(patient_map, patient_ids, augment=False):
     X = []
     y = []
-    label_encoding = {"ARVC": 0, "CONTROL": 1, "LQTS": 2}
+    label_encoding = {"ARVC": 0, "CONTROL_LQTS": 1}
 
     for patient_id in patient_ids:
         for file_path, label in patient_map[patient_id]:
@@ -84,12 +112,12 @@ def prepare_dataset(patient_map, patient_ids, augment=False):
                     X.append(augmented_data)
                     y.append(label_encoding[label])
 
-    return np.array(X), np.array(y, dtype=np.float32)
+    return np.array(X), np.array(y, dtype=np.int32)
 
 # Function to load a specific model
 def load_model(model_name, input_shape=(2500, 8)):
     try:
-        model_module = importlib.import_module(f"models.{model_name}")
+        model_module = importlib.import_module(f"models_2_class.{model_name}")
         model = model_module.build_model(input_shape)
         print(f"Loaded model: {model_name}")
         return model
@@ -107,7 +135,9 @@ def train_and_evaluate(root_dir, model, epochs, batch_size, experiment):
     X_test, y_test = prepare_dataset(patient_map, test_ids, augment=False)
 
     # Print data types for debugging
-    print(f"X_train dtype: {X_train.dtype}, y_train dtype: {y_train.dtype}")
+    print(f"X_train shape: {X_train.shape}, y_train dtype: {y_train.shape}")
+    print(f"X_tval dtype: {X_val.shape}, y_train dtype: {y_val.shape}")
+    print(f"X_train dtype: {X_test.shape}, y_train dtype: {y_test.shape}")
 
     # Train the model
     history = model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=epochs, batch_size=batch_size)
@@ -122,25 +152,27 @@ def train_and_evaluate(root_dir, model, epochs, batch_size, experiment):
     y_pred = np.argmax(y_pred_probs, axis=1)
 
     # Confusion Matrix
-    cm = confusion_matrix(y_test, y_pred, labels=[0, 1, 2])
+    cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
     print("Confusion Matrix:")
     print(cm)
-    experiment.log_confusion_matrix(y_true=y_test, y_predicted=y_pred, labels=[0, 1, 2])
+    experiment.log_confusion_matrix(y_true=y_test, y_predicted=y_pred, labels=[0, 1])
 
     # Calculate Sensitivity and Specificity
-    tp = np.diag(cm)
-    fp = cm.sum(axis=0) - tp
-    fn = cm.sum(axis=1) - tp
-    tn = cm.sum() - (fp + fn + tp)
 
-    sensitivity = tp / (tp + fn)
-    specificity = tn / (tn + fp)
+    tp = cm[1, 1]  # True Positives
+    fp = cm[0, 1]  # False Positives
+    fn = cm[1, 0]  # False Negatives
+    tn = cm[0, 0]  # True Negatives
+
+    # Calculate Sensitivity and Specificity
+    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
     experiment.log_metric("Test_Sensitivity", sensitivity.mean())
     experiment.log_metric("Test_Specificity", specificity.mean())
 
     # ROC-AUC Score
-    y_test_binarized = label_binarize(y_test, classes=[0, 1, 2])
-    auc_score = roc_auc_score(y_test_binarized, y_pred_probs, average='macro', multi_class='ovr')
+    y_test_binarized = label_binarize(y_test, classes=[0, 1])
+    auc_score = roc_auc_score(y_test_binarized, y_pred, average='macro', multi_class='ovr')
     print(f"Macro-Averaged ROC-AUC Score: {auc_score:.2f}")
     experiment.log_metric("Test_ROC_AUC", auc_score)
 
